@@ -13,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.log4j.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -21,6 +22,7 @@ import org.jsoup.select.Elements;
 import com.google.gson.JsonArray;
 import com.vonderhaar.dungeonparser.executor.DungeonParserRetrievalTask;
 import com.vonderhaar.dungeonparser.util.DungeonParserUtil;
+import com.vonderhaar.dungeonparser.util.DungeonType;
 
 /**
  * 
@@ -35,14 +37,18 @@ import com.vonderhaar.dungeonparser.util.DungeonParserUtil;
  */
 public class DungeonParser {
 	
+	private static Logger _log = Logger.getLogger(DungeonParser.class);
+	
 	/**
 	 * @param limit
 	 * @throws IOException
 	 */
-	public DungeonParser(int limit) throws IOException { 
+	public DungeonParser(int limit, DungeonType dungeonType) throws IOException { 
 		
 		File specialDungeonsHTML = 
-				writeURLToFile("http://www.puzzledragonx.com/en/special-dungeons.asp", "special-dungeons.html");
+				writeURLToFile("http://www.puzzledragonx.com/en/" + dungeonType + ".asp", dungeonType + ".html");
+		
+		_log.info("Retrieving " + dungeonType);
 		
 		Document doc = Jsoup.parse(specialDungeonsHTML, "UTF-8");
 		Elements dungeons = doc.select("td.dungeon > div.dungeon > a");
@@ -50,8 +56,6 @@ public class DungeonParser {
 		if (limit > dungeons.size()) {
 			limit = dungeons.size();
 		}
-		
-		JsonArray dungeonsJSON = new JsonArray();
 		
 		int i = 0;
 		
@@ -76,12 +80,12 @@ public class DungeonParser {
 		
 		int j = 0;
 		
-		System.out.println("Starting dungeon retrieval tasks");
+		_log.info("Starting dungeon retrieval tasks");
 		
 		while (j < tasks.size()) {
 			if (executor.getActiveCount() < 0.8 * executor.getMaximumPoolSize()) {
 				executor.execute(tasks.get(j++));
-				System.out.println((j / ((double) limit / 100)) + "% started");
+				_log.info((j / ((double) limit / 100)) + "% started");
 			} else {
 				try {
 					Thread.sleep(100);
@@ -92,7 +96,7 @@ public class DungeonParser {
 			}
 		}
 		
-		System.out.println("All retrieval tasks started");
+		_log.info("All retrieval tasks started");
 		
         executor.shutdown();
         
@@ -102,17 +106,18 @@ public class DungeonParser {
         
         	if (executor.getActiveCount() < limit && executor.getActiveCount() < lastSeenNumTasks) {
         		lastSeenNumTasks = executor.getActiveCount();
-        		System.out.println((((double) limit - lastSeenNumTasks) / ((double) limit / 100)) + "% completed");
+        		_log.info((((double) limit - lastSeenNumTasks) / ((double) limit / 100)) + "% completed");
         	}
         }
-        System.out.println("All retrieval tasks completed");
+        
+        _log.info("All retrieval tasks completed");
 			
         BufferedWriter bufferedWriter = null;
 		FileWriter fileWriter = null;
 
 		try {
 
-			fileWriter = new FileWriter("special-dungeons.json");
+			fileWriter = new FileWriter(dungeonType + ".json");
 			bufferedWriter = new BufferedWriter(fileWriter);
 
 			bufferedWriter.write("[");
@@ -150,11 +155,6 @@ public class DungeonParser {
 			}
 
 		}
-        
-		// Temporarily print to terminal for collection
-		// TODO pipe this into a file
-		System.out.println(dungeonsJSON);
-		
 	}
 
 	
@@ -172,11 +172,11 @@ public class DungeonParser {
 			fileReader = new FileReader(file);
 			fileReader.close();
 			
-			System.out.println(file + " already in place");
+			_log.info(file + " already in place");
 			 
 			return new File(file);
 		} catch (FileNotFoundException e) {
-			System.out.println("Cannot find " + file + ", loading from PADX");
+			_log.info("Cannot find " + file + ", loading from PADX");
 		} 
 		
 		HttpURLConnection connection = DungeonParserUtil.getPreparedPADXConnection(URL);
@@ -191,7 +191,12 @@ public class DungeonParser {
 	}
 	
 	public static void main(String[] args) throws IOException {
-		new DungeonParser(100/*Integer.MAX_VALUE*/);
+		new DungeonParser(Integer.MAX_VALUE, DungeonType.SPECIAL);
+//		new DungeonParser(5/*Integer.MAX_VALUE*/, DungeonType.TECHNICAL);
+//		new DungeonParser(5/*Integer.MAX_VALUE*/, DungeonType.NORMAL);
+//		new DungeonParser(1/*Integer.MAX_VALUE*/, DungeonType.MULTIPLAYER);
+
+		//TODO coin dungeons
 	}
 	
 }

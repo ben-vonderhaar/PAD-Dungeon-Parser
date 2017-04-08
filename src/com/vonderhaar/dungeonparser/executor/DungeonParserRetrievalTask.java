@@ -36,16 +36,17 @@ public class DungeonParserRetrievalTask implements Runnable {
 		for (int i = 0; i < 5; i++) {
 			try {
 						
-				JsonArray floorsJSON = new JsonArray();
+				JsonArray floorsJSON = new JsonArray(), invadesJSON = new JsonArray();
 			
 				Document missionHTML = Jsoup.parse(new URL("http://m.puzzledragonx.com/" + this.dungeonLinkHref), 20000);
 	
 				// Initial dungeon data parsing
-				String dungeonName = DungeonParserUtil.getOnlyElement(missionHTML, 
-						"div#mission1 > div.info > span.large > span.xlarge").text();
 				this.dungeonJSON.addProperty("dungeonId", this.dungeonId);
-				this.dungeonJSON.addProperty("dungeonName", dungeonName);
-				
+				this.dungeonJSON.addProperty("dungeonName", DungeonParserUtil.getOnlyElement(missionHTML, 
+						"div#header > div.title-wrapper > div.title > h1").text());
+				this.dungeonJSON.addProperty("subDungeonName", DungeonParserUtil.getOnlyElement(missionHTML, 
+						"div#mission1 > div.info > span.large > span.xlarge").text());
+
 				// TODO handle invades that could happen on any floor.
 				
 				// div with id=mission2 is always present and contains floor information.
@@ -92,7 +93,14 @@ public class DungeonParserRetrievalTask implements Runnable {
 							}
 						
 							enemyJSON.add("loots", loots);
-							enemiesJSON.add(enemyJSON);
+							
+							if (DungeonParserUtil.getOnlyElement(missionPart, "div.monster > div.avatar > img").attr("style").contains("border-color: #6e4070")) {
+								invadesJSON.add(enemyJSON);
+							} else {
+								enemiesJSON.add(enemyJSON);
+							}
+							
+							
 						}
 					}
 	
@@ -108,6 +116,7 @@ public class DungeonParserRetrievalTask implements Runnable {
 	
 				// Add floors to the dungeon object, then add the dungeon to the list of dungeons processed so far.
 				this.dungeonJSON.add("floors", floorsJSON);
+				this.dungeonJSON.add("invades", invadesJSON);
 				
 				// Once dungeon is successfully retrieved, break out of loop
 				break;
