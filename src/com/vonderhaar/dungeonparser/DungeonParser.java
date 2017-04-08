@@ -1,11 +1,16 @@
 package com.vonderhaar.dungeonparser;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.commons.io.FileUtils;
 import org.jsoup.Jsoup;
@@ -14,8 +19,8 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.vonderhaar.dungeonparser.executor.DungeonParserRetrievalTask;
+import com.vonderhaar.dungeonparser.util.DungeonParserUtil;
 
 /**
  * 
@@ -42,160 +47,116 @@ public class DungeonParser {
 		Document doc = Jsoup.parse(specialDungeonsHTML, "UTF-8");
 		Elements dungeons = doc.select("td.dungeon > div.dungeon > a");
 		
+		if (limit > dungeons.size()) {
+			limit = dungeons.size();
+		}
+		
 		JsonArray dungeonsJSON = new JsonArray();
 		
 		int i = 0;
 		
+		ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+		executor.setCorePoolSize(5);
+		executor.setMaximumPoolSize(50);
+		
+		List<DungeonParserRetrievalTask> tasks = new ArrayList<DungeonParserRetrievalTask>();
+		
 		for (Element dungeon : dungeons) {
 			
-			try {
-		
-				JsonObject dungeonJSON = new JsonObject();			
-				JsonArray floorsJSON = new JsonArray();
+			DungeonParserRetrievalTask task = new DungeonParserRetrievalTask(DungeonParserUtil.getDungeonIdFromAnchor(dungeon), 
+					dungeon.attr("href"));
+            
+			tasks.add(task);
 			
-				Document missionHTML = Jsoup.parse(new URL("http://m.puzzledragonx.com/" + dungeon.attr("href")), 30000);
-	
-				// Initial dungeon data parsing
-				String dungeonName = getOnlyElement(missionHTML, "div#mission1 > div.info > span.large > span.xlarge").text();
-				dungeonJSON.addProperty("dungeonId", getDungeonIdFromAnchor(dungeon));
-				dungeonJSON.addProperty("dungeonName", dungeonName);
-				
-				// TODO handle invades that could happen on any floor.
-				
-				System.out.println(dungeonName);
-				
-				// div with id=mission2 is always present and contains floor information.
-				Elements missionContainer = missionHTML.select("div#mission2");
-				
-				if (missionContainer.size() == 1) {
-					
-					JsonObject floorJSON = null;
-					JsonArray enemiesJSON = null;
-					
-					// Beneath the missionContainer are a number of divs, alternating between floor indicators and 
-					// 1+ enemy information containers.
-					for (Element missionPart : missionContainer.select("div")) {
-						
-						if (missionPart.attr("class").contains("floornum")) {
-							
-							// Add existing floor data (if any) to the list of floors processed so far.
-							if (null != floorJSON) {
-								floorJSON.add("enemies", enemiesJSON);
-								floorsJSON.add(floorJSON);
-							}
-							
-							// Stub out new floor.
-							floorJSON = new JsonObject();
-							
-							// TODO parse actual floor number, as PADX sometimes skips floors in new/low difficulty dungeons
-							floorJSON.addProperty("floorNum", floorsJSON.size() + 1);
-							
-							enemiesJSON = new JsonArray();
-							
-						} else if (missionPart.attr("class").contains("monster")) {
-							
-							// Parse information about the enemy, including their ID and any loot that can drop from them
-							Element enemy = getOnlyElement(missionPart,
-									"div.monster > div.detail-wrapper > div.stat-wrapper > div.name > a");
-							
-							JsonObject enemyJSON = new JsonObject();
-							JsonArray loots = new JsonArray();
-							
-							enemyJSON.addProperty("monsterId", getMonsterIdFromAnchor(enemy));
-							
-							for (Element loot : missionPart.select("div.monster > div.loot > a")) {
-								loots.add(new JsonPrimitive(getMonsterIdFromAnchor(loot)));
-							}
-						
-							enemyJSON.add("loots", loots);
-							enemiesJSON.add(enemyJSON);
-						}
-					}
-	
-					// Handle last floor
-					if (null != floorJSON) {
-						floorJSON.add("enemies", enemiesJSON);
-						floorsJSON.add(floorJSON);
-					}
-					
-				} else {
-					System.out.println("Malformed mission");
-				}
-	
-				// Add floors to the dungeon object, then add the dungeon to the list of dungeons processed so far.
-				dungeonJSON.add("floors", floorsJSON);
-				dungeonsJSON.add(dungeonJSON);
-			
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-
 			// Break after specified limit
-			i++;
-			if (i > limit) {
+			if (++i >= limit) {
 				break;
 			}
 		}
+		
+		int j = 0;
+		
+		System.out.println("Starting dungeon retrieval tasks");
+		
+		while (j < tasks.size()) {
+			if (executor.getActiveCount() < 0.8 * executor.getMaximumPoolSize()) {
+				executor.execute(tasks.get(j++));
+				System.out.println((j / ((double) limit / 100)) + "% started");
+			} else {
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		}
+		
+		System.out.println("All retrieval tasks started");
+		
+        executor.shutdown();
+        
+        int lastSeenNumTasks = Integer.MAX_VALUE;
+        
+        while (!executor.isTerminated()) { 
+        
+        	if (executor.getActiveCount() < limit && executor.getActiveCount() < lastSeenNumTasks) {
+        		lastSeenNumTasks = executor.getActiveCount();
+        		System.out.println((((double) limit - lastSeenNumTasks) / ((double) limit / 100)) + "% completed");
+        	}
+        }
+        System.out.println("All retrieval tasks completed");
 			
+        BufferedWriter bufferedWriter = null;
+		FileWriter fileWriter = null;
+
+		try {
+
+			fileWriter = new FileWriter("special-dungeons.json");
+			bufferedWriter = new BufferedWriter(fileWriter);
+
+			bufferedWriter.write("[");
+			
+			for (int k = 0; k < tasks.size(); k++) {
+				
+				if (k > 0) {
+					bufferedWriter.write(",");
+				}
+				
+				bufferedWriter.write(tasks.get(k).getDungeonJSON().toString());
+			}
+
+			bufferedWriter.write("]");
+
+
+		} catch (IOException e) {
+
+			e.printStackTrace();
+
+		} finally {
+
+			try {
+
+				if (bufferedWriter != null)
+					bufferedWriter.close();
+
+				if (fileWriter != null)
+					fileWriter.close();
+
+			} catch (IOException ex) {
+
+				ex.printStackTrace();
+
+			}
+
+		}
+        
 		// Temporarily print to terminal for collection
 		// TODO pipe this into a file
 		System.out.println(dungeonsJSON);
 		
 	}
-	
-	/**
-	 * 
-	 * @param anchor
-	 * @return
-	 */
-	private static Long getMonsterIdFromAnchor(Element anchor) {
-		return getSomeIdFromAnchor(anchor, "n=");
-	}
-	
-	/**
-	 * 
-	 * @param anchor
-	 * @return
-	 */
-	private static Long getDungeonIdFromAnchor(Element anchor) {
-		return getSomeIdFromAnchor(anchor, "m=");
-	}
-	
-	/**
-	 * 
-	 * @param anchor
-	 * @param idPrefix
-	 * @return
-	 */
-	private static Long getSomeIdFromAnchor(Element anchor, String idPrefix) {
-		String href = anchor.attr("href");
-		return Long.valueOf(href.substring(href.indexOf(idPrefix) + 2));
-	}
-	
-	/**
-	 * TODO make this safe with proper error handling
-	 * 
-	 * @param parentElement the Element on which the cssQuery should selected from
-	 * @param cssQuery a String adhering to jsoup's cssQuery syntax
-	 * @return if only one Element is found given the parameters, that Element
-	 */
-	private static Element getOnlyElement(Element parentElement, String cssQuery) {
-		return parentElement.select(cssQuery).get(0);
-	}
 
-	/**
-	 * @param URL
-	 * @return
-	 * @throws IOException
-	 */
-	private static HttpURLConnection getPreparedPADXConnection(String URL) throws IOException {
-		HttpURLConnection connection = (HttpURLConnection) new URL(URL).openConnection();
-        
-		connection.setRequestMethod("GET");
-		connection.setRequestProperty("User-agent", "Dungeon Parser");
-        
-        return connection;
-	}
 	
 	/**
 	 * @param URL
@@ -218,7 +179,7 @@ public class DungeonParser {
 			System.out.println("Cannot find " + file + ", loading from PADX");
 		} 
 		
-		HttpURLConnection connection = getPreparedPADXConnection(URL);
+		HttpURLConnection connection = DungeonParserUtil.getPreparedPADXConnection(URL);
         
 		connection.connect();
 		FileUtils.copyInputStreamToFile(connection.getInputStream(), new File(file));
@@ -230,7 +191,7 @@ public class DungeonParser {
 	}
 	
 	public static void main(String[] args) throws IOException {
-		new DungeonParser(Integer.MAX_VALUE);
+		new DungeonParser(100/*Integer.MAX_VALUE*/);
 	}
 	
 }
