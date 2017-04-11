@@ -29,7 +29,6 @@ import com.vonderhaar.dungeonparser.util.DungeonType;
  * 
  * TODO:
  * Refactor all strings into constants
- * Handle normal/technical dungeons as well as special dungeons
  * Provide ability to specify configurations when invoking from command line
  * 
  * 
@@ -90,7 +89,6 @@ public class DungeonParser {
 				try {
 					Thread.sleep(100);
 				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
 			}
@@ -192,11 +190,9 @@ public class DungeonParser {
 	
 	public static void main(String[] args) throws IOException {
 		new DungeonParser(Integer.MAX_VALUE, DungeonType.SPECIAL);
-//		new DungeonParser(5/*Integer.MAX_VALUE*/, DungeonType.TECHNICAL);
-//		new DungeonParser(5/*Integer.MAX_VALUE*/, DungeonType.NORMAL);
-//		new DungeonParser(1/*Integer.MAX_VALUE*/, DungeonType.MULTIPLAYER);
-
-		//TODO coin dungeons
+		new DungeonParser(Integer.MAX_VALUE, DungeonType.TECHNICAL);
+		new DungeonParser(Integer.MAX_VALUE, DungeonType.NORMAL);
+		new DungeonParser(Integer.MAX_VALUE, DungeonType.MULTIPLAYER);
 	}
 	
 }

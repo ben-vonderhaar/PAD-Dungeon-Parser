@@ -36,7 +36,7 @@ public class DungeonParserRetrievalTask implements Runnable {
 		for (int i = 0; i < 5; i++) {
 			try {
 						
-				JsonArray floorsJSON = new JsonArray(), invadesJSON = new JsonArray();
+				JsonArray floorsJSON = new JsonArray(), invadesJSON = new JsonArray(), randomEnemiesJSON = new JsonArray();
 			
 				Document missionHTML = Jsoup.parse(new URL("http://m.puzzledragonx.com/" + this.dungeonLinkHref), 20000);
 	
@@ -47,8 +47,6 @@ public class DungeonParserRetrievalTask implements Runnable {
 				this.dungeonJSON.addProperty("subDungeonName", DungeonParserUtil.getOnlyElement(missionHTML, 
 						"div#mission1 > div.info > span.large > span.xlarge").text());
 
-				// TODO handle invades that could happen on any floor.
-				
 				// div with id=mission2 is always present and contains floor information.
 				Elements missionContainer = missionHTML.select("div#mission2");
 				
@@ -64,7 +62,8 @@ public class DungeonParserRetrievalTask implements Runnable {
 						if (missionPart.attr("class").contains("floornum")) {
 							
 							// Add existing floor data (if any) to the list of floors processed so far.
-							if (null != floorJSON) {
+							// Do not add Random enemies, even though PDX presents them as their own floor
+							if (null != floorJSON && !floorJSON.get("floorNum").getAsString().equals("Random")) {
 								floorJSON.add("enemies", enemiesJSON);
 								floorsJSON.add(floorJSON);
 							}
@@ -72,8 +71,7 @@ public class DungeonParserRetrievalTask implements Runnable {
 							// Stub out new floor.
 							floorJSON = new JsonObject();
 							
-							// TODO parse actual floor number, as PADX sometimes skips floors in new/low difficulty dungeons
-							floorJSON.addProperty("floorNum", floorsJSON.size() + 1);
+							floorJSON.addProperty("floorNum", missionPart.text());
 							
 							enemiesJSON = new JsonArray();
 							
@@ -96,6 +94,8 @@ public class DungeonParserRetrievalTask implements Runnable {
 							
 							if (DungeonParserUtil.getOnlyElement(missionPart, "div.monster > div.avatar > img").attr("style").contains("border-color: #6e4070")) {
 								invadesJSON.add(enemyJSON);
+							} else if(floorJSON.get("floorNum").getAsString().equals("Random")) {
+								randomEnemiesJSON.add(enemyJSON);
 							} else {
 								enemiesJSON.add(enemyJSON);
 							}
@@ -117,6 +117,7 @@ public class DungeonParserRetrievalTask implements Runnable {
 				// Add floors to the dungeon object, then add the dungeon to the list of dungeons processed so far.
 				this.dungeonJSON.add("floors", floorsJSON);
 				this.dungeonJSON.add("invades", invadesJSON);
+				this.dungeonJSON.add("randomEnemies", randomEnemiesJSON);
 				
 				// Once dungeon is successfully retrieved, break out of loop
 				break;
